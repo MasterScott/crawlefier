@@ -1,0 +1,34 @@
+{
+  "name": "crawlefier",
+  "version": "0.1.1",
+  "description": "Multilinks web crawler for Node with Headless Chrome and blacklist. Based on Async/Await.",
+  "main": "./distribution/main.js",
+  "scripts": {
+    "test": "babel-node test.js",
+    "build": "babel ./src/ --out-dir distribution",
+    "prepublish": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/assnctr/crawlefier.git"
+  },
+  "keywords": [
+    "crawler",
+    "scrapper"
+  ],
+  "author": "assnctr",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^0.18.0",
+    "puppeteer": "^1.4.0"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-preset-es2015": "^6.24.1",
+    "babel-preset-stage-0": "^6.24.1"
+  },
+  "bugs": {
+    "url": "https://github.com/assnctr/crawlefier/issues"
+  },
+  "homepage": "https://github.com/assnctr/crawlefier#readme"
+}
