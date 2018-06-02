@@ -1,15 +1,16 @@
 import DEFAULT_SETTINGS from './constants/settings';
-import BlackList from './blacklist';
-import LinksList from './links';
+import Links from './links';
 import Pool from './pool';
-import { uniq } from './misc/uniq';
+import {wait} from './misc';
 import axios from "axios";
-import { launch } from "puppeteer";
+import {launch} from "puppeteer";
 
 class Crawlefier {
-    constructor(settings = DEFAULT_SETTINGS, blackList = []) {
+    constructor(settings = DEFAULT_SETTINGS, blackList = false) {
         this.settings = {
             timeout: settings.timeout,
+            external: settings.external,
+            blackList: blackList,
             userAgent: settings.userAgent,
             headlessChrome: settings.headlessChrome,
             depth: {
@@ -19,30 +20,26 @@ class Crawlefier {
         }
 
         this.counter = {
-            links: {
-                all: 0,
-                done: 0
-            }
+            all: 0,
+            done: 0
         }
 
-        this.blackList = new BlackList(blackList);
-        this.linksList = new LinksList();
         this.pool = new Pool(settings.threads);
-        this.getLinksMethod = settings.external ? this.allLinks : this.internalLinks;
         this.getRequestMethod = settings.headlessChrome ? this.puppeteerRequest : this.axiosRequest;
     }
-
+    
     setCallbacks(onSuccess, onError) {
         if (onSuccess) this.onSuccessCallback = onSuccess;
         if (onError) this.onErrorCallback = onError;
     }
-
+    
     async launch(links, onSuccess, onError) {
-        let urls = this.normalizeLinks(links);
-        if (urls == null) {
+        // if links is not set or provides empty array
+        if (!links || !links.length) {
             throw new Error('No links!');
         }
-
+        
+        this.links = new Links(this.settings.external, links, this.settings.blackList);
         this.setCallbacks(onSuccess, onError);
 
         if(this.settings.headlessChrome) {
@@ -52,27 +49,16 @@ class Crawlefier {
         return new Promise((resolve, reject) => {
             this.reject = reject;
             this.resolve = resolve;
-            
-            this.linksList.set(urls);
-            this.crawl(urls);
+            this.crawl(this.links.all);
         });
-    }
-
-    /**
-     * Normalize urls without protocol.
-     * @param {array} links 
-     * @returns {array} urls with protocol.
-     */
-    normalizeLinks(links) {
-        return links.map((link) => link.match(/http:\/\/|https:\/\//g) ? link : `http://${link}`);
     }
 
     crawl(links) {
         if (links.length > 0) {
             this.settings.depth.current++;
-            this.parsedLinks = [];
-            this.counter.links.done = 0;
-            this.counter.links.all = links.length;
+            this.links.next = [];
+            this.counter.done = 0;
+            this.counter.all = links.length;
 
             links.forEach(link => 
                 this.pool.addTask(this.getRequestMethod.bind(this, link))
@@ -80,16 +66,12 @@ class Crawlefier {
 
             this.pool.run();
         } else {
-            this.resolve(this.linksList.get());
+            this.resolve(this.links.all);
         }
     }
 
     isDone() {
-        return this.counter.links.done == this.counter.links.all;
-    }
-
-    wait(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return this.counter.done == this.counter.all;
     }
 
     isCloudflare(content) {
@@ -99,7 +81,7 @@ class Crawlefier {
     }
 
     onSuccess(url, content) {
-        this.parsedLinks = this.parsedLinks.concat(this.getLinksMethod(url, content));
+        this.links.find(url, content);
         this.update();
 
         if (this.onSuccessCallback) {
@@ -115,7 +97,11 @@ class Crawlefier {
         }
     }
 
-    async puppeteerRequest(url) {
+    /**
+     *@param {string} url crawl url
+     *@param {function} next sets next callback in pool queue
+     */
+    async puppeteerRequest(url, next) {
         try {
             const page = await this.headlessChrome.newPage();
             await page.setUserAgent(this.settings.userAgent);
@@ -123,138 +109,49 @@ class Crawlefier {
             let content = await page.content();
     
             if(this.isCloudflare(content)) {
-                await this.wait(7500);
+                await wait(7500);
                 content = await page.content();
             }
             
             this.onSuccess(url, content);
             await page.close();
+            next();
         } catch (error) {
             this.onError(url, error);
+            next();
         }
     }
-
-    async axiosRequest(url) {
+    
+    /**
+     *@param {string} url crawl url
+     *@param {function} next sets next callback in pool queue
+     */
+    async axiosRequest(url, next) {
         try {
             const req = await axios.get(url, {timeout: this.settings.timeout, responseType: 'text', userAgent: this.settings.userAgent});
             this.onSuccess(url, req.data);
+            next();
         } catch (error) {
             this.onError(url, error);
+            next();
         }
     }
 
     update() {
-        this.counter.links.done++;
-        this.parsedLinks = uniq(this.blackList.filter(this.linksList.filterNextLinks(this.parsedLinks)));
-        this.linksList.set(this.parsedLinks);
-
+        this.counter.done++;
+        
         if (this.isDone()) {
             if (this.settings.depth.current < this.settings.depth.max) {
-                this.crawl(this.parsedLinks);
+                this.links.setAll();
+                this.crawl(this.links.next);
             } else {
                 if (this.settings.headlessChrome) {
                     this.headlessChrome.close();
                 }
 
-                this.resolve(this.linksList.get());
+                this.resolve(this.links.all);
             }
-        } else {
-            this.pool.nextTask();
         }
-    }
-
-    /**
-     * 
-     * @param {string} url
-     * @returns {array} url protocol, host, path
-     * 
-     * Exeption for broken links.
-     * 
-     */
-    getUrlProps(url) {
-        try {
-            const match = url.match(/^(http|https)?(?:[\:\/]*)([a-z0-9\.-]*)(?:\:([0-9]+))?(\/[^?#]*)?(?:\?([^#]*))?(?:#(.*))?$/i);
-    
-            return {
-                protocol: match[1],
-                host: match[2],
-                path: match[4]
-            } 
-        } catch (error) {
-            return {
-                protocol: null,
-                host: null,
-                path: null
-            } 
-        }
-    }
-
-    parseLinks(content) {
-        try {
-            return content.match(new RegExp('<a(.*?)href=(((\'|").*?(\'|")))', 'gi')).join("\n").match(new RegExp('href=(((\'|").*?(\'|")))', 'gi')).map((item) => item.slice(6, -1));
-        } catch (error) {
-            return [];
-        }
-    }
-
-    allLinks(url, content) {
-        let urlProps = this.getUrlProps(url),
-            extractLinks = this.parseLinks(content);
-
-        return extractLinks.map((link) => {
-            if (link[0] == "/" && link[1] == "/") {
-                return link.slice(2);
-            } else {
-                if (link[0] == "/") {
-                    return urlProps.protocol + "://" + urlProps.host + link;
-                }
-
-                if (!this.getUrlProps(link).protocol) {
-                    return urlProps.protocol + "://" + urlProps.host + "/" + link;
-                }
-            }
-
-            return link;
-        });
-    }
-
-    internalLinks(url, content) {
-        let urlProps = this.getUrlProps(url),
-            extractLinks = this.parseLinks(content);
-
-        let filtered = extractLinks.filter((link) => {
-            if (link[0] == "/") {
-                return link;
-            }
-
-            if (urlProps.host === this.getUrlProps(link).host) {
-                return link;
-            }
-        });
-
-        let next = filtered.map((link) => {
-            if (link[0] == "/") {
-                return urlProps.protocol + "://" + urlProps.host + link;
-            }
-
-            if (urlProps.host === this.getUrlProps(link).host) {
-                if (link[0] == "/" && link[1] == "/") {
-                    return link.slice(2);
-                } else {
-                    if (link[0] == "/") {
-                        return urlProps.protocol + "://" + urlProps.host + link;
-                    }
-
-                    if (!this.getUrlProps(link).protocol) {
-                        return urlProps.protocol + "://" + urlProps.host + "/" + link;
-                    }
-                }
-
-                return link;
-            }
-        });
-
-        return next;
     }
 }
 
