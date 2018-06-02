@@ -15,7 +15,7 @@ npm install crawlefier
 
 # Example
 ## Default crawl
-### Launch method returns array of links which was found. 
+### Launch method returns array of crawled links. 
 
 ```js
 import Crawlefier from 'crawlefier';
@@ -24,7 +24,7 @@ const crawl = async urls => {
     const crawler = new Crawlefier();
     const result = await crawler.launch(urls);
 
-    // prints array of links
+    // prints array of crawled links
     console.log(result);
 }
 
@@ -56,8 +56,7 @@ const crawl = async urls => {
         console.log(error.url, error.message);
     });
 
-    // prints array of links
-    // max depth is 2. But returns found links (also contains links those was not crawled). Includes links for 3rd step depth.
+    // prints array of crawled links
     console.log(result);
 }
 
