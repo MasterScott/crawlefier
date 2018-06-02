@@ -1,6 +1,6 @@
 {
   "name": "crawlefier",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Multilinks web crawler for Node with Headless Chrome and blacklist. Based on Async/Await.",
   "main": "./distribution/main.js",
   "scripts": {
