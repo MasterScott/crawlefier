@@ -25,11 +25,11 @@ class Pool {
 
         this.running++;
         const task = this.queue.shift();
-        task();
+        task(this.nextTask.bind(this));
     }
 
     run() {
-        let startPoolThreadsCount = this.queue.length > this.max ? this.max : this.queue.length;
+        const startPoolThreadsCount = this.queue.length > this.max ? this.max : this.queue.length;
 
         for (let index = 0; index < startPoolThreadsCount; index++) {
             this.runTask();
